@@ -27,6 +27,9 @@ description.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
+
 [dependencies]
 # arrow
 arrow = { workspace = true }
@@ -43,13 +46,24 @@ arrow-select = { workspace = true }
 object_store = { workspace = true }
 parquet = { workspace = true }
 
+# avro
+apache-avro = { workspace = true }
+apache-avro-derive = { workspace = true }
+
 # serde
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 # "stdlib"
-anyhow = { workspace = true }
+thiserror = { workspace = true }
 bytes = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+lazy_static = { workspace = true }
+log = { workspace = true }
+num-traits = { workspace = true }
+once_cell = { workspace = true }
+paste = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 url = { workspace = true }
@@ -60,5 +74,31 @@ dashmap = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 
+# protobuf
+prost = { workspace = true }
+
+# compression
+flate2 = { workspace = true }
+
+# datafusion
+datafusion = { workspace = true, optional = true }
+datafusion-expr = { workspace = true, optional = true }
+datafusion-common = { workspace = true, optional = true }
+datafusion-physical-expr = { workspace = true, optional = true }
+percent-encoding = { workspace = true }
+
 [dev-dependencies]
-hudi-tests = { path = "../tests" }
+hudi-test = { path = "../test" }
+serial_test = { workspace = true }
+tempfile = { workspace = true }
+
+[lints.clippy]
+result_large_err = "allow"
+
+[features]
+datafusion = [
+    "dep:datafusion",
+    "datafusion-expr",
+    "datafusion-common",
+    "datafusion-physical-expr",
+]

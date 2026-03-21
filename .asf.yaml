@@ -21,10 +21,11 @@
 # https://cwiki.apache.org/confluence/display/INFRA/Git+-+.asf.yaml+features
 
 github:
-  description: "A native Rust library for Apache Hudi, with bindings into Python"
+  description: "The native Rust implementation for Apache Hudi, with C++ & Python API bindings."
   homepage: https://hudi.apache.org/
   labels:
     - apache
+    - c-plus-plus
     - hudi
     - rust
     - python
@@ -32,6 +33,7 @@ github:
     wiki: false
     issues: true
     projects: true
+    discussions: true
   enabled_merge_buttons:
     squash: true
     merge: false
@@ -41,10 +43,14 @@ github:
       required_status_checks:
         strict: true
       required_linear_history: true
-      required_conversation_resolution: true
+  pull_requests:
+    allow_auto_merge: true
+    allow_update_branch: true
+    del_branch_on_merge: true
   dependabot_alerts: true
   dependabot_updates: true
 notifications:
   commits:      commits@hudi.apache.org
   issues:       commits@hudi.apache.org
   pullrequests: commits@hudi.apache.org
+  discussions:  dev@hudi.apache.org

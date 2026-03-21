@@ -16,31 +16,49 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! Hudi Configurations.
 use std::any::type_name;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
+use crate::config::error::{ConfigError, Result};
+use crate::storage::error::Result as StorageResult;
+use crate::storage::util::parse_uri;
+use ConfigError::NotFound;
+use serde::{Deserialize, Serialize};
+use url::Url;
 
+pub mod error;
 pub mod internal;
 pub mod read;
 pub mod table;
+pub mod util;
 
+pub const HUDI_CONF_DIR: &str = "HUDI_CONF_DIR";
+
+/// This defines some common APIs for working with configurations in Hudi.
 pub trait ConfigParser: AsRef<str> {
+    /// Configuration value type.
     type Output;
 
+    /// Supplies the default value of the configuration.
     fn default_value(&self) -> Option<Self::Output>;
 
+    fn key(&self) -> String {
+        self.as_ref().to_string()
+    }
+
+    /// To indicate if the configuration is required or not, this helps in validation.
     fn is_required(&self) -> bool {
         false
     }
 
+    /// Validate the configuration by parsing the given [String] value and check if it is required.
     fn validate(&self, configs: &HashMap<String, String>) -> Result<()> {
         match self.parse_value(configs) {
             Ok(_) => Ok(()),
             Err(e) => {
-                if !self.is_required() && e.to_string().ends_with("not found") {
-                    // TODO: introduce error type to avoid checking "not found"
+                if !self.is_required() && matches!(e, NotFound(_)) {
                     Ok(())
                 } else {
                     Err(e)
@@ -49,8 +67,12 @@ pub trait ConfigParser: AsRef<str> {
         }
     }
 
+    /// Parse the [String] value to [Self::Output].
     fn parse_value(&self, configs: &HashMap<String, String>) -> Result<Self::Output>;
 
+    /// Parse the [String] value to [Self::Output], or return the default value.
+    ///
+    /// Panic if the default value is not defined.
     fn parse_value_or_default(&self, configs: &HashMap<String, String>) -> Self::Output {
         self.parse_value(configs).unwrap_or_else(|_| {
             self.default_value()
@@ -59,6 +81,7 @@ pub trait ConfigParser: AsRef<str> {
     }
 }
 
+/// All possible data types for Hudi Configuration values.
 #[derive(Clone, Debug)]
 pub enum HudiConfigValue {
     Boolean(bool),
@@ -69,8 +92,17 @@ pub enum HudiConfigValue {
 }
 
 impl HudiConfigValue {
-    pub fn to<T: 'static + std::fmt::Debug + From<HudiConfigValue>>(self) -> T {
-        T::from(self)
+    /// A convenience method to convert [HudiConfigValue] to [Url] when the value is a [String] and is intended to be a URL.
+    /// Panic if the value is not a [String].
+    pub fn to_url(self) -> StorageResult<Url> {
+        match self {
+            HudiConfigValue::String(v) => parse_uri(&v),
+            _ => panic!(
+                "Cannot cast {:?} to {}",
+                type_name::<Self>(),
+                type_name::<Url>()
+            ),
+        }
     }
 }
 
@@ -122,50 +154,129 @@ impl From<HudiConfigValue> for Vec<String> {
     }
 }
 
-#[derive(Clone, Debug)]
+/// Hudi configuration container.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HudiConfigs {
-    pub raw_configs: Arc<HashMap<String, String>>,
+    raw_options: Arc<HashMap<String, String>>,
 }
 
 impl HudiConfigs {
-    pub fn new(raw_configs: HashMap<String, String>) -> Self {
+    /// Create [HudiConfigs] using options in the form of key-value pairs.
+    pub fn new<I, K, V>(options: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: Into<String>,
+    {
+        let raw_options = options
+            .into_iter()
+            .map(|(k, v)| (k.as_ref().into(), v.into()))
+            .collect();
         Self {
-            raw_configs: Arc::new(raw_configs),
+            raw_options: Arc::new(raw_options),
         }
     }
 
+    /// Create an empty [HudiConfigs].
     pub fn empty() -> Self {
         Self {
-            raw_configs: Arc::new(HashMap::new()),
+            raw_options: Arc::new(HashMap::new()),
         }
     }
 
-    pub fn validate(&self, parser: impl ConfigParser<Output = HudiConfigValue>) -> Result<()> {
-        parser.validate(&self.raw_configs)
+    /// Create a deep-copy of the configs as [String] options in the form of key-value pairs.
+    pub fn as_options(&self) -> HashMap<String, String> {
+        self.raw_options.as_ref().clone()
     }
 
+    /// Validate the associated config using the given parser by execute the [ConfigParser::validate] method.
+    pub fn validate(&self, parser: impl ConfigParser<Output = HudiConfigValue>) -> Result<()> {
+        parser.validate(&self.raw_options)
+    }
+
+    /// Check if the given key exists in the configs.
+    pub fn contains(&self, key: impl AsRef<str>) -> bool {
+        self.raw_options.contains_key(key.as_ref())
+    }
+
+    /// Get value for the given config. Return [Result] with the value.
+    /// If the config is not found or value was not parsed properly, return [Err].
     pub fn get(
         &self,
         parser: impl ConfigParser<Output = HudiConfigValue>,
     ) -> Result<HudiConfigValue> {
-        parser.parse_value(&self.raw_configs)
+        parser.parse_value(&self.raw_options)
     }
 
+    /// Get value or default value. If the config has no default value, this will panic.
     pub fn get_or_default(
         &self,
         parser: impl ConfigParser<Output = HudiConfigValue>,
     ) -> HudiConfigValue {
-        parser.parse_value_or_default(&self.raw_configs)
+        parser.parse_value_or_default(&self.raw_options)
     }
 
+    /// Get value or default value. If the config has no default value, this will return [None].
     pub fn try_get(
         &self,
         parser: impl ConfigParser<Output = HudiConfigValue>,
     ) -> Option<HudiConfigValue> {
-        let res = parser.parse_value(&self.raw_configs);
+        let res = parser.parse_value(&self.raw_options);
         match res {
             Ok(v) => Some(v),
             Err(_) => parser.default_value(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_using_hashmap() {
+        let mut options = HashMap::new();
+        options.insert("key1".to_string(), "value1".to_string());
+        options.insert("key2".to_string(), "value2".to_string());
+
+        let config = HudiConfigs::new(options.clone());
+
+        assert_eq!(*config.raw_options, options);
+    }
+
+    #[test]
+    fn test_new() {
+        let options = vec![("key1", "value1"), ("key2", "value2")];
+
+        let config = HudiConfigs::new(options);
+
+        let expected: HashMap<String, String> = vec![
+            ("key1".to_string(), "value1".to_string()),
+            ("key2".to_string(), "value2".to_string()),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(*config.raw_options, expected);
+    }
+
+    #[test]
+    fn test_empty() {
+        let config = HudiConfigs::empty();
+
+        assert!(config.raw_options.is_empty());
+    }
+
+    #[test]
+    fn test_as_options() {
+        let mut options = HashMap::new();
+        options.insert("key1".to_string(), "value1".to_string());
+        options.insert("key2".to_string(), "value2".to_string());
+
+        let config = HudiConfigs::new(options.clone());
+
+        let result = config.as_options();
+
+        assert_eq!(result, options);
     }
 }

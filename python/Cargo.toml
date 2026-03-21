@@ -23,7 +23,7 @@ license.workspace = true
 rust-version.workspace = true
 keywords.workspace = true
 readme.workspace = true
-description = "Native Python binding for Apache Hudi, based on hudi-rs."
+description = "Native Python binding for Apache Hudi, based on Hudi-rs."
 homepage.workspace = true
 repository = "https://github.com/apache/hudi-rs/tree/main/python/"
 
@@ -33,18 +33,29 @@ crate-type = ["cdylib"]
 doc = false
 
 [dependencies]
-hudi = { path = "../crates/hudi" }
+hudi = { path = "../crates/hudi"}
+hudi-test = { path = "../crates/test", optional = true }
 # arrow
-arrow = { workspace = true }
-arrow-schema = { workspace = true }
+arrow = { workspace = true, features = ["pyarrow"] }
+
+datafusion = { workspace = true, optional = true}
+datafusion-ffi = { workspace = true, optional = true}
 
 # "stdlib"
-anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 # runtime / async
 futures = { workspace = true }
 tokio = { workspace = true }
 
 [dependencies.pyo3]
-version = "0.21.2"
-features = ["extension-module", "abi3", "abi3-py38", "gil-refs", "anyhow"]
+version = "0.26"
+features = ["extension-module", "abi3", "abi3-py310"]
+
+[features]
+default = []
+datafusion = ["dep:datafusion","dep:datafusion-ffi","hudi/datafusion"]
+testing = ["dep:hudi-test", "hudi-test/datafusion"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }

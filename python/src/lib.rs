@@ -20,13 +20,38 @@ use pyo3::prelude::*;
 
 mod internal;
 
-#[cfg(not(tarpaulin))]
+#[cfg(feature = "datafusion")]
+mod datafusion_internal;
+
+#[cfg(feature = "testing")]
+mod testing_internal;
+
+#[cfg(not(tarpaulin_include))]
 #[pymodule]
 fn _internal(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
 
-    use internal::{HudiFileSlice, HudiTable};
+    use internal::{HudiFileGroupReader, HudiFileSlice, HudiInstant, HudiTable, HudiTimeline};
+    m.add_class::<HudiFileGroupReader>()?;
     m.add_class::<HudiFileSlice>()?;
+    m.add_class::<HudiInstant>()?;
     m.add_class::<HudiTable>()?;
+    m.add_class::<HudiTimeline>()?;
+
+    #[cfg(feature = "datafusion")]
+    {
+        use datafusion_internal::HudiDataFusionDataSource;
+        m.add_class::<HudiDataFusionDataSource>()?;
+    }
+
+    #[cfg(feature = "testing")]
+    {
+        use testing_internal::{get_test_table_path, verify_v9_txns_table};
+        m.add_function(wrap_pyfunction!(get_test_table_path, m)?)?;
+        m.add_function(wrap_pyfunction!(verify_v9_txns_table, m)?)?;
+    }
+
+    use internal::build_hudi_table;
+    m.add_function(wrap_pyfunction!(build_hudi_table, m)?)?;
     Ok(())
 }

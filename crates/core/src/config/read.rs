@@ -16,26 +16,72 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+//! Hudi read configurations.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::str::FromStr;
 
-use crate::config::{ConfigParser, HudiConfigValue};
-use anyhow::{anyhow, Result};
 use strum_macros::EnumIter;
+
+use crate::config::Result;
+use crate::config::error::ConfigError::{NotFound, ParseBool, ParseInt};
+use crate::config::{ConfigParser, HudiConfigValue};
+
+/// Configurations for reading Hudi tables.
+///
+/// **Example**
+///
+/// ```rust
+/// use hudi_core::config::read::HudiReadConfig::InputPartitions;
+/// use hudi_core::table::Table as HudiTable;
+///
+/// let options = [(InputPartitions, "2")];
+/// HudiTable::new_with_options_blocking("/tmp/hudi_data", options);
+/// ```
+///
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, EnumIter)]
 pub enum HudiReadConfig {
+    /// Start timestamp (exclusive) for [FileGroup] to filter records.
+    FileGroupStartTimestamp,
+
+    /// End timestamp (inclusive) for [FileGroup] to filter records.
+    FileGroupEndTimestamp,
+
+    /// Number of input partitions to read the data in parallel.
+    ///
+    /// For processing 100 files, [InputPartitions] being 5 will produce 5 partitions, with each partition having 20 files.
     InputPartitions,
-    AsOfTimestamp,
+
+    /// Parallelism for listing files on storage.
+    ListingParallelism,
+
+    /// When set to true, only [BaseFile]s will be read for optimized reads.
+    /// This is only applicable to Merge-On-Read (MOR) tables.
+    UseReadOptimizedMode,
+
+    /// Target number of rows per batch for streaming reads.
+    /// This controls the batch size when using streaming APIs.
+    StreamBatchSize,
 }
 
 impl AsRef<str> for HudiReadConfig {
     fn as_ref(&self) -> &str {
         match self {
+            Self::FileGroupStartTimestamp => "hoodie.read.file_group.start_timestamp",
+            Self::FileGroupEndTimestamp => "hoodie.read.file_group.end_timestamp",
             Self::InputPartitions => "hoodie.read.input.partitions",
-            Self::AsOfTimestamp => "hoodie.read.as.of.timestamp",
+            Self::ListingParallelism => "hoodie.read.listing.parallelism",
+            Self::UseReadOptimizedMode => "hoodie.read.use.read_optimized.mode",
+            Self::StreamBatchSize => "hoodie.read.stream.batch_size",
         }
+    }
+}
+
+impl Display for HudiReadConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_ref())
     }
 }
 
@@ -45,6 +91,9 @@ impl ConfigParser for HudiReadConfig {
     fn default_value(&self) -> Option<HudiConfigValue> {
         match self {
             HudiReadConfig::InputPartitions => Some(HudiConfigValue::UInteger(0usize)),
+            HudiReadConfig::ListingParallelism => Some(HudiConfigValue::UInteger(10usize)),
+            HudiReadConfig::UseReadOptimizedMode => Some(HudiConfigValue::Boolean(false)),
+            HudiReadConfig::StreamBatchSize => Some(HudiConfigValue::UInteger(1024usize)),
             _ => None,
         }
     }
@@ -53,41 +102,88 @@ impl ConfigParser for HudiReadConfig {
         let get_result = configs
             .get(self.as_ref())
             .map(|v| v.as_str())
-            .ok_or(anyhow!("Config '{}' not found", self.as_ref()));
+            .ok_or(NotFound(self.key()));
 
         match self {
+            Self::FileGroupStartTimestamp => {
+                get_result.map(|v| HudiConfigValue::String(v.to_string()))
+            }
+            Self::FileGroupEndTimestamp => {
+                get_result.map(|v| HudiConfigValue::String(v.to_string()))
+            }
             Self::InputPartitions => get_result
-                .and_then(|v| usize::from_str(v).map_err(|e| anyhow!(e)))
+                .and_then(|v| {
+                    usize::from_str(v).map_err(|e| ParseInt(self.key(), v.to_string(), e))
+                })
                 .map(HudiConfigValue::UInteger),
-            Self::AsOfTimestamp => get_result.map(|v| HudiConfigValue::String(v.to_string())),
+            Self::ListingParallelism => get_result
+                .and_then(|v| {
+                    usize::from_str(v).map_err(|e| ParseInt(self.key(), v.to_string(), e))
+                })
+                .map(HudiConfigValue::UInteger),
+            Self::UseReadOptimizedMode => get_result
+                .and_then(|v| {
+                    bool::from_str(v).map_err(|e| ParseBool(self.key(), v.to_string(), e))
+                })
+                .map(HudiConfigValue::Boolean),
+            Self::StreamBatchSize => get_result
+                .and_then(|v| {
+                    usize::from_str(v).map_err(|e| ParseInt(self.key(), v.to_string(), e))
+                })
+                .map(HudiConfigValue::UInteger),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::config::read::HudiReadConfig::InputPartitions;
-    use crate::config::ConfigParser;
-    use std::collections::HashMap;
-    use std::num::ParseIntError;
+    use super::*;
+    use crate::config::read::HudiReadConfig::{
+        InputPartitions, ListingParallelism, UseReadOptimizedMode,
+    };
 
     #[test]
     fn parse_valid_config_value() {
-        let options = HashMap::from([(InputPartitions.as_ref().to_string(), "100".to_string())]);
-        let value = InputPartitions.parse_value(&options).unwrap().to::<usize>();
-        assert_eq!(value, 100usize);
+        let options = HashMap::from([
+            (InputPartitions.as_ref().to_string(), "100".to_string()),
+            (ListingParallelism.as_ref().to_string(), "100".to_string()),
+            (
+                UseReadOptimizedMode.as_ref().to_string(),
+                "true".to_string(),
+            ),
+        ]);
+        let actual: usize = InputPartitions.parse_value(&options).unwrap().into();
+        assert_eq!(actual, 100);
+        let actual: usize = ListingParallelism.parse_value(&options).unwrap().into();
+        assert_eq!(actual, 100);
+        let actual: bool = UseReadOptimizedMode.parse_value(&options).unwrap().into();
+        assert!(actual);
     }
 
     #[test]
     fn parse_invalid_config_value() {
-        let options = HashMap::from([(InputPartitions.as_ref().to_string(), "foo".to_string())]);
-        let value = InputPartitions.parse_value(&options);
-        assert!(value.err().unwrap().is::<ParseIntError>());
-        assert_eq!(
-            InputPartitions
-                .parse_value_or_default(&options)
-                .to::<usize>(),
-            0
-        );
+        let options = HashMap::from([
+            (InputPartitions.as_ref().to_string(), "foo".to_string()),
+            (ListingParallelism.as_ref().to_string(), "_100".to_string()),
+            (UseReadOptimizedMode.as_ref().to_string(), "1".to_string()),
+        ]);
+        assert!(matches!(
+            InputPartitions.parse_value(&options).unwrap_err(),
+            ParseInt(_, _, _)
+        ));
+        let actual: usize = InputPartitions.parse_value_or_default(&options).into();
+        assert_eq!(actual, 0);
+        assert!(matches!(
+            ListingParallelism.parse_value(&options).unwrap_err(),
+            ParseInt(_, _, _)
+        ));
+        let actual: usize = ListingParallelism.parse_value_or_default(&options).into();
+        assert_eq!(actual, 10);
+        assert!(matches!(
+            UseReadOptimizedMode.parse_value(&options).unwrap_err(),
+            ParseBool(_, _, _)
+        ));
+        let actual: bool = UseReadOptimizedMode.parse_value_or_default(&options).into();
+        assert!(!actual)
     }
 }

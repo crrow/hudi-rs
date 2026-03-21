@@ -1,0 +1,198 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+SHELL := /bin/bash
+
+.DEFAULT_GOAL := help
+
+VENV := .venv
+PYTHON_DIR = python
+MATURIN_VERSION := $(shell grep 'requires =' $(PYTHON_DIR)/pyproject.toml | cut -d= -f2- | tr -d '[ "]')
+PACKAGE_VERSION := $(shell grep version Cargo.toml | head -n 1 | awk '{print $$3}' | tr -d '"' )
+
+# Check if uv is installed (only enforced for Python-related targets)
+UV_CHECK := $(shell command -v uv 2> /dev/null)
+define check_uv
+	@if [ -z "$(UV_CHECK)" ]; then \
+		echo "Error: uv is not installed. Please install it first: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+		exit 1; \
+	fi
+endef
+
+# Check if cargo-tarpaulin is installed (only enforced for coverage targets)
+TARPAULIN_CHECK := $(shell command -v cargo-tarpaulin 2> /dev/null)
+define check_tarpaulin
+	@if [ -z "$(TARPAULIN_CHECK)" ]; then \
+		echo "Error: cargo-tarpaulin is not installed. Run: cargo install cargo-tarpaulin"; \
+		exit 1; \
+	fi
+endef
+
+# =============================================================================
+# Coverage Configuration
+# =============================================================================
+COV_OUTPUT_DIR := ./cov-reports
+COV_THRESHOLD ?= 60
+COV_EXCLUDE := \
+	--exclude-files 'cpp/src/*' \
+	--exclude-files 'crates/core/src/avro_to_arrow/*' \
+	--exclude-files 'benchmark/*'
+TARPAULIN_COMMON := --engine llvm --no-dead-code --no-fail-fast \
+	--all-features --workspace $(COV_EXCLUDE) --skip-clean
+
+.PHONY: help
+help: ## Show this help message
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: setup-venv
+setup-venv: ## Setup the virtualenv
+	$(call check_uv)
+	$(info --- Setup virtualenv ---)
+	uv venv $(VENV)
+
+.PHONY: setup
+setup: ## Setup the requirements
+	$(call check_uv)
+	$(info --- Setup dependencies ---)
+	uv pip install "$(MATURIN_VERSION)"
+
+.PHONY: build
+build: setup ## Build Python binding of hudi-rs
+	$(info --- Build Python binding ---)
+	./build-wrapper.sh maturin build --features datafusion,testing $(MATURIN_EXTRA_ARGS) -m $(PYTHON_DIR)/Cargo.toml
+
+.PHONY: develop
+develop: setup ## Install Python binding of hudi-rs
+	$(info --- Develop with Python binding ---)
+	./build-wrapper.sh maturin develop --extras=devel,datafusion --features datafusion,testing $(MATURIN_EXTRA_ARGS) -m $(PYTHON_DIR)/Cargo.toml
+
+.PHONY: format
+format: format-rust format-python ## Format Rust and Python code
+
+.PHONY: format-rust
+format-rust: ## Format Rust code
+	$(info --- Format Rust code ---)
+	./build-wrapper.sh cargo fmt --all
+
+.PHONY: format-python
+format-python: ## Format Python code
+	$(info --- Format Python code ---)
+	ruff format $(PYTHON_DIR)
+
+.PHONY: check
+check: check-rust check-python ## Run check on Rust and Python
+
+.PHONY: check-rust
+check-rust: ## Run check on Rust
+	$(info --- Check Rust clippy ---)
+	./build-wrapper.sh cargo clippy --all-targets --all-features --workspace --no-deps -- -D warnings
+	$(info --- Check Rust format ---)
+	./build-wrapper.sh cargo fmt --all -- --check
+
+.PHONY: check-python
+check-python: ## Run check on Python
+	$(info --- Check Python format ---)
+	ruff format --check --diff $(PYTHON_DIR)
+	$(info --- Check Python linting ---)
+	ruff check $(PYTHON_DIR)
+	$(info --- Check Python typing ---)
+	pushd $(PYTHON_DIR); mypy .; popd
+
+.PHONY: test
+test: test-rust test-python ## Run tests on Rust and Python
+
+.PHONY: test-rust
+test-rust: ## Run tests on Rust
+	$(info --- Run Rust tests ---)
+	./build-wrapper.sh cargo test --no-fail-fast --all-targets --all-features --workspace
+
+.PHONY: test-python
+test-python: ## Run tests on Python
+	$(call check_uv)
+	$(info --- Run Python tests ---)
+	uv run pytest -s $(PYTHON_DIR)
+
+.PHONY: coverage
+coverage: coverage-rust ## Generate coverage report (alias for coverage-rust)
+
+.PHONY: coverage-rust
+coverage-rust: ## Generate HTML coverage report for Rust
+	$(call check_tarpaulin)
+	@mkdir -p $(COV_OUTPUT_DIR)
+	./build-wrapper.sh cargo tarpaulin $(TARPAULIN_COMMON) \
+		-o Html --output-dir $(COV_OUTPUT_DIR)
+	@echo "Coverage report generated at $(COV_OUTPUT_DIR)/tarpaulin-report.html"
+
+.PHONY: coverage-xml
+coverage-xml: ## Generate XML coverage report for Rust (CI format)
+	$(call check_tarpaulin)
+	@mkdir -p $(COV_OUTPUT_DIR)
+	./build-wrapper.sh cargo tarpaulin $(TARPAULIN_COMMON) \
+		-o xml --output-dir $(COV_OUTPUT_DIR)
+
+.PHONY: coverage-open
+coverage-open: coverage-rust ## Generate and open HTML coverage report in browser
+	@command -v open >/dev/null 2>&1 && open $(COV_OUTPUT_DIR)/tarpaulin-report.html || \
+	 command -v xdg-open >/dev/null 2>&1 && xdg-open $(COV_OUTPUT_DIR)/tarpaulin-report.html || \
+	 echo "Open $(COV_OUTPUT_DIR)/tarpaulin-report.html manually"
+
+.PHONY: coverage-check
+coverage-check: ## Fail if coverage is below threshold (COV_THRESHOLD=60)
+	$(call check_tarpaulin)
+	./build-wrapper.sh cargo tarpaulin $(TARPAULIN_COMMON) \
+		--fail-under $(COV_THRESHOLD)
+
+.PHONY: clean-coverage
+clean-coverage: ## Remove coverage reports
+	rm -rf $(COV_OUTPUT_DIR)
+
+# =============================================================================
+# TPC-H Benchmark
+# =============================================================================
+SF ?= 0.001
+ENGINE ?= datafusion
+FORMAT ?= hudi
+MODE ?= native
+QUERIES ?=
+TPCH_DIR := benchmark/tpch
+TPCH_DATA_DIR := $(TPCH_DIR)/data
+TPCH_RESULTS_DIR := $(TPCH_DIR)/results
+
+.PHONY: tpch-generate
+tpch-generate: ## Generate TPC-H parquet tables (SF=0.001)
+	$(info --- Generate TPC-H parquet tables at SF=$(SF) ---)
+	$(TPCH_DIR)/run.sh generate --scale-factor $(SF)
+
+.PHONY: tpch-create-tables
+tpch-create-tables: ## Create Hudi COW tables from parquet (SF=0.001, requires Docker)
+	$(info --- Create Hudi tables at SF=$(SF) ---)
+	$(TPCH_DIR)/run.sh create-tables --scale-factor $(SF)
+
+.PHONY: bench-tpch
+bench-tpch: ## Run TPC-H benchmark (ENGINE=datafusion|spark SF=0.001 MODE=native|docker QUERIES=1,3,6)
+	$(info --- Benchmark at SF=$(SF) MODE=$(MODE) ---)
+ifeq ($(ENGINE),spark)
+	MODE=$(MODE) $(TPCH_DIR)/run.sh bench-spark --scale-factor $(SF) --format $(FORMAT) $(if $(QUERIES),--queries $(QUERIES)) --output-dir $(TPCH_RESULTS_DIR)
+else ifeq ($(ENGINE),datafusion)
+	MODE=$(MODE) $(TPCH_DIR)/run.sh bench-datafusion --scale-factor $(SF) --format $(FORMAT) $(if $(QUERIES),--queries $(QUERIES)) --output-dir $(TPCH_RESULTS_DIR)
+else
+	$(error Unknown ENGINE=$(ENGINE). Use datafusion or spark)
+endif
+
+.PHONY: tpch-compare
+tpch-compare: ## Compare persisted TPC-H benchmark results (ENGINES=datafusion,spark SF=0.001)
+	$(TPCH_DIR)/run.sh compare --scale-factor $(SF) --engines $(ENGINES) --format $(FORMAT)

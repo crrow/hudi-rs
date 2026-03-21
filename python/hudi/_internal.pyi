@@ -15,42 +15,370 @@
 #  specific language governing permissions and limitations
 #  under the License.
 from dataclasses import dataclass
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional, Tuple
 
-import pyarrow
+import pyarrow  # type: ignore
 
 __version__: str
 
+@dataclass(init=False)
+class HudiFileGroupReader:
+    """
+    The reader that handles all read operations against a file group.
+
+    Attributes:
+        base_uri (str): The base URI of the file group's residing table.
+        options (Optional[Dict[str, str]]): Additional options for the reader.
+    """
+    def __init__(self, base_uri: str, options: Optional[Dict[str, str]] = None):
+        """
+        Initializes the HudiFileGroupReader.
+
+        Parameters:
+            base_uri (str): The base URI of the Hudi table.
+            options (Optional[Dict[str, str]]): Additional configuration options (optional).
+        """
+        ...
+    def read_file_slice_by_base_file_path(
+        self, relative_path: str
+    ) -> "pyarrow.RecordBatch":
+        """
+        Reads the data from the base file at the given relative path.
+
+        Parameters:
+            relative_path (str): The relative path to the base file.
+
+        Returns:
+            pyarrow.RecordBatch: A record batch read from the base file.
+        """
+        ...
+    def read_file_slice(self, file_slice: HudiFileSlice) -> "pyarrow.RecordBatch":
+        """
+        Reads the data from the given file slice.
+
+        Parameters:
+            file_slice (HudiFileSlice): The file slice to read from.
+
+        Returns:
+            pyarrow.RecordBatch: A record batch read from the file slice.
+        """
+        ...
+
+    def read_file_slice_from_paths(
+        self, base_file_path: str, log_file_paths: List[str]
+    ) -> "pyarrow.RecordBatch":
+        """
+        Read a file slice from a base file and a list of log files.
+
+        Args:
+            base_file_path (str): The relative path to the base file.
+            log_file_paths (List[str]): A list of relative paths to log files.
+
+        Returns:
+            pyarrow.RecordBatch: The merged record batch from base file and log files.
+        """
+        ...
 
 @dataclass(init=False)
 class HudiFileSlice:
-    file_group_id: str
+    """
+    Represents a file slice in a Hudi table. A file slice includes information about the base file,
+    the partition it belongs to, and associated metadata.
+
+    Attributes:
+        file_id (str): The id of the file group this file slice belongs to.
+        partition_path (str): The path of the partition containing this file slice.
+        creation_instant_time (str): The creation instant time of this file slice.
+        base_file_name (str): The name of the base file.
+        base_file_size (int): The on-disk size of the base file in bytes.
+        base_file_byte_size (int): The in-memory size of the base file in bytes.
+        log_file_names (List[str]): The names of the ordered log files.
+        num_records (int): The number of records in the file slice.
+    """
+
+    file_id: str
     partition_path: str
-    commit_time: str
+    creation_instant_time: str
     base_file_name: str
     base_file_size: int
+    base_file_byte_size: int
+    log_file_names: List[str]
     num_records: int
 
-    def base_file_relative_path(self) -> str: ...
+    def base_file_relative_path(self) -> str:
+        """
+        Returns the relative path of the base file for this file slice.
 
+        Returns:
+            str: The relative path of the base file.
+        """
+        ...
+    def log_files_relative_paths(self) -> List[str]:
+        """
+        Returns the relative paths of the log files for this file slice.
+
+        Returns:
+            List[str]: A list of relative paths of the log files.
+        """
+        ...
+
+@dataclass(init=False)
+class HudiInstant:
+    @property
+    def timestamp(self) -> str: ...
+    @property
+    def action(self) -> str: ...
+    @property
+    def state(self) -> str: ...
+    @property
+    def epoch_mills(self) -> int: ...
 
 @dataclass(init=False)
 class HudiTable:
+    """
+    Represents a Hudi table and provides methods to interact with it.
+
+    Attributes:
+        base_uri (str): The base URI of the Hudi table.
+        options (Optional[Dict[str, str]]): Additional options for table operations.
+    """
 
     def __init__(
-            self,
-            table_uri: str,
-            options: Optional[Dict[str, str]] = None,
-    ): ...
+        self,
+        base_uri: str,
+        options: Optional[Dict[str, str]] = None,
+    ):
+        """
+        Initializes the HudiTable.
 
-    def get_schema(self) -> "pyarrow.Schema": ...
+        Parameters:
+            base_uri (str): The base URI of the Hudi table.
+            options (Optional[Dict[str, str]]): Additional configuration options (optional).
+        """
+        ...
+    def hudi_options(self) -> Dict[str, str]:
+        """
+        Get hudi options for table.
 
-    def split_file_slices(self, n: int) -> List[List[HudiFileSlice]]: ...
+        Returns:
+            Dict[str, str]: A dictionary of hudi options.
+        """
+        ...
+    def storage_options(self) -> Dict[str, str]:
+        """
+        Get storage options set for table instance.
 
-    def get_file_slices(self) -> List[HudiFileSlice]: ...
+        Returns:
+            Dict[str, str]: A dictionary of storage options.
+        """
+        ...
+    @property
+    def table_name(self) -> str:
+        """
+        Get table name.
 
-    def read_file_slice(self, base_file_relative_path) -> pyarrow.RecordBatch: ...
+        Returns:
+            str: The name of the table.
+        """
+        ...
+    @property
+    def table_type(self) -> str:
+        """
+        Get table type.
 
-    def read_snapshot(self) -> List["pyarrow.RecordBatch"]: ...
+        Returns:
+            str: The type of the table.
+        """
+        ...
+    @property
+    def is_mor(self) -> str:
+        """
+        Get whether the table is an MOR table.
 
-    def read_snapshot_as_of(self, timestamp: str) -> List["pyarrow.RecordBatch"]: ...
+        Returns:
+            str: True if the table is a MOR table, False otherwise.
+        """
+        ...
+    @property
+    def timezone(self) -> str:
+        """
+        Get timezone.
+
+        Returns:
+            str: The timezone of the table.
+        """
+        ...
+    def get_avro_schema(self) -> str:
+        """
+        Returns the Avro schema of the Hudi table.
+
+        Returns:
+            str: The Avro schema of the table.
+        """
+        ...
+    def get_schema(self) -> "pyarrow.Schema":
+        """
+        Returns the schema of the Hudi table.
+
+        Returns:
+            pyarrow.Schema: The schema of the table.
+        """
+        ...
+    def get_partition_schema(self) -> "pyarrow.Schema":
+        """
+        Returns the partition schema of the Hudi table.
+
+        Returns:
+            pyarrow.Schema: The schema used for partitioning the table.
+        """
+        ...
+    def get_timeline(self) -> HudiTimeline:
+        """
+        Returns the timeline of the Hudi table.
+        """
+        ...
+    def get_file_slices_splits(
+        self, num_splits: int, filters: Optional[List[Tuple[str, str, str]]]
+    ) -> List[List[HudiFileSlice]]:
+        """
+        Retrieves all file slices in the Hudi table in 'num_splits' splits, optionally filtered by given filters.
+
+        Parameters:
+            num_splits (int): The number of parts to split the file slices into.
+            filters (Optional[List[Tuple[str, str, str]]]): Optional filters for selecting file slices.
+
+        Returns:
+            List[List[HudiFileSlice]]: A list of file slice groups, each group being a list of HudiFileSlice objects.
+        """
+        ...
+    def get_file_slices_splits_as_of(
+        self,
+        num_splits: int,
+        timestamp: str,
+        filters: Optional[List[Tuple[str, str, str]]],
+    ) -> List[List[HudiFileSlice]]:
+        """
+        Retrieves all file slices in the Hudi table as of a timestamp in 'num_splits' splits, optionally filtered by given filters.
+        """
+        ...
+    def get_file_slices(
+        self, filters: Optional[List[Tuple[str, str, str]]]
+    ) -> List[HudiFileSlice]:
+        """
+        Retrieves all file slices in the Hudi table, optionally filtered by the provided filters.
+
+        Parameters:
+            filters (Optional[List[Tuple[str, str, str]]]): Optional filters for selecting file slices.
+
+        Returns:
+            List[HudiFileSlice]: A list of file slices matching the filters.
+        """
+        ...
+    def get_file_slices_as_of(
+        self, timestamp: str, filters: Optional[List[Tuple[str, str, str]]]
+    ) -> List[HudiFileSlice]:
+        """
+        Retrieves all file slices in the Hudi table as of a timestamp, optionally filtered by the provided filters.
+        """
+        ...
+    def get_file_slices_between(
+        self,
+        start_timestamp: Optional[str],
+        end_timestamp: Optional[str],
+    ) -> List[HudiFileSlice]:
+        """
+        Retrieves all changed file slices in the Hudi table between the given timestamps.
+        """
+        ...
+    def create_file_group_reader_with_options(
+        self, options: Optional[Dict[str, str]] = None
+    ) -> HudiFileGroupReader:
+        """
+        Creates a HudiFileGroupReader for reading records from file groups in the Hudi table.
+
+        Returns:
+            HudiFileGroupReader: A reader object for reading file groups.
+        """
+        ...
+    def read_snapshot(
+        self, filters: Optional[List[Tuple[str, str, str]]]
+    ) -> List["pyarrow.RecordBatch"]:
+        """
+        Reads the latest snapshot of the Hudi table, optionally filtered by the provided filters.
+
+        Parameters:
+            filters (Optional[List[Tuple[str, str, str]]]): Optional filters for selecting file slices.
+
+        Returns:
+            List[pyarrow.RecordBatch]: A list of record batches from the snapshot of the table.
+        """
+        ...
+    def read_snapshot_as_of(
+        self, timestamp: str, filters: Optional[List[Tuple[str, str, str]]]
+    ) -> List["pyarrow.RecordBatch"]:
+        """
+        Reads the snapshot of the Hudi table as of a timestamp, optionally filtered by the provided filters.
+        """
+        ...
+    def read_incremental_records(
+        self, start_timestamp: str, end_timestamp: Optional[str]
+    ) -> List["pyarrow.RecordBatch"]:
+        """
+        Reads incremental records from the Hudi table between the given timestamps.
+
+        Parameters:
+            start_timestamp (str): The start timestamp (exclusive).
+            end_timestamp (Optional[str]): The end timestamp (inclusive).
+
+        Returns:
+            List[pyarrow.RecordBatch]: A list of record batches containing incremental records.
+        """
+        ...
+
+@dataclass(init=False)
+class HudiTimeline:
+    def get_completed_commits(self, desc: bool = False) -> List[HudiInstant]: ...
+    def get_completed_deltacommits(self, desc: bool = False) -> List[HudiInstant]: ...
+    def get_completed_replacecommits(self, desc: bool = False) -> List[HudiInstant]: ...
+    def get_completed_clustering_commits(
+        self, desc: bool = False
+    ) -> List[HudiInstant]: ...
+    def get_instant_metadata_in_json(self, instant: HudiInstant) -> str: ...
+    def get_latest_commit_timestamp(self) -> str: ...
+    def get_latest_avro_schema(self) -> str: ...
+    def get_latest_schema(self) -> "pyarrow.Schema": ...
+
+def build_hudi_table(
+    base_uri: str,
+    hudi_options: Optional[Dict[str, str]] = None,
+    storage_options: Optional[Dict[str, str]] = None,
+    options: Optional[Dict[str, str]] = None,
+) -> HudiTable:
+    """
+    Builds hudi table from base_uri and options.
+
+    Parameters:
+        base_uri (str): location of a hudi table.
+        hudi_options (Optional[Dict[str, str]]): hudi options.
+        storage_options (Optional[Dict[str, str]]): storage_options.
+        options (Optional[Dict[str, str]]): hudi or storage options.
+
+    Returns:
+        HudiTable: An instance of hudi table.
+    """
+    ...
+@dataclass(init=False)
+class HudiDataFusionDataSource:
+    def __init__(
+        self,
+        base_uri: str,
+        options: Optional[List[Tuple[str, str]]] = None,
+    ):
+        """
+        Initializes the HudiDataFusionDataSource.
+
+        Parameters:
+            base_uri (str): The base URI of the Hudi table.
+            options (Optional[List[Tuple[str, str]]]): Additional configuration options (optional).
+        """
+        ...

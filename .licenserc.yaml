@@ -25,6 +25,8 @@ header:
     - 'NOTICE'
     - '**/data/**'
     - '.github/PULL_REQUEST_TEMPLATE.md'
+    - 'crates/core/schemas/**'
+    - 'benchmark/tpch/queries/**'
 
   comment: on-failure
 

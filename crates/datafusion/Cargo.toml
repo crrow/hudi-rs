@@ -28,9 +28,19 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-hudi-core = { version = "0.2.0", path = "../core" }
+hudi-core = { version = "0.5.0-dev", path = "../core", features = ["datafusion"] }
 # arrow
+arrow = { workspace = true }
+arrow-arith = { workspace = true }
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-cast = { workspace = true }
+arrow-ipc = { workspace = true }
+arrow-json = { workspace = true }
+arrow-ord = { workspace = true }
+arrow-row = { workspace = true }
 arrow-schema = { workspace = true }
+arrow-select = { workspace = true }
 
 # datafusion
 datafusion = { workspace = true }
@@ -43,5 +53,8 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
 
+# logging
+log = { workspace = true }
+
 [dev-dependencies]
-hudi-tests = { path = "../tests" }
+hudi-test = { path = "../test", features = ["datafusion"] }
